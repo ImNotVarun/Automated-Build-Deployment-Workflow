@@ -31,8 +31,8 @@ This repository contains a small Python helper script, `doc-dockerfile.py`, whic
 1. **Clone your repo** (if you haven’t already):
 
    ```bash
-   git clone git@github.com:<your-org>/<your-repo>.git
-   cd <your-repo>
+   git clone git@github.com:ImNotVarun/Automated-Build-Deployment-Workflow.git
+   cd Automated-Build-Deployment-Workflow
    ```
 
 2. **Run the generator script**:
