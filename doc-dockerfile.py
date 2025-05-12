@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 
-import os
 import subprocess
 import sys
 from pathlib import Path
 
-WORKFLOW_PATH = Path(".github/workflows/gen-dockerfile.yml")
+WORKFLOW_PATH = Path(".github/workflows/containerize-static-site.yml")
 
-WORKFLOW_CONTENT = """name: Build & Release Docker Image
+WORKFLOW_CONTENT = """\
+name: Containerize Static Site
 
 on:
   push:
-    branches:
-      - main            # or your default branch
+    paths:
+      - .github/workflows/containerize-static-site.yml
 
 permissions:
-  contents: write     # allow tagging & release uploads
+  contents: write
 
 jobs:
   build-and-release:
@@ -25,30 +25,39 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v3
 
+      - name: Build Static Site (Vite or plain)
+        run: |
+          if [ -f package.json ]; then
+            npm install
+            npm run build
+          else
+            mkdir -p dist
+            cp -r *.html *.css *.js dist/ 2>/dev/null || true
+          fi
+
       - name: Generate Dockerfile
         run: |
-          echo "FROM alpine" > Dockerfile
-          echo 'CMD ["echo","Hello from Docker"]' >> Dockerfile
+          cat << 'EOF' > Dockerfile
+          FROM nginx:alpine
+          COPY dist/ /usr/share/nginx/html
+          EXPOSE 80
+          EOF
 
       - name: Build Docker image
         run: |
-          docker build -t app:${{ github.sha }} .
+          docker build -t static-site:${{ github.sha }} .
 
       - name: Save image to tarball
         run: |
-          IMAGE_TAG="app-${{ github.sha }}"
-          docker tag app:${{ github.sha }} $IMAGE_TAG
-          docker save $IMAGE_TAG -o image.tar
+          docker save static-site:${{ github.sha }} -o image.tar
 
       - name: Create Git tag
         id: tag
         run: |
           TAG="v$(date +'%Y%m%d%H%M%S')"
           echo "tag=$TAG" >> $GITHUB_OUTPUT
-
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
           git tag $TAG
           git push origin $TAG
         env:
@@ -65,17 +74,17 @@ jobs:
 """
 
 def is_git_repo():
-    return subprocess.run(["git", "rev-parse", "--is-inside-work-tree"],
-                          stdout=subprocess.DEVNULL).returncode == 0
+    return subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        stdout=subprocess.DEVNULL
+    ).returncode == 0
 
 def get_github_remote():
     try:
         url = subprocess.check_output(
             ["git", "remote", "get-url", "origin"], text=True
         ).strip()
-        if "github.com" in url:
-            return url
-        return None
+        return url if "github.com" in url else None
     except subprocess.CalledProcessError:
         return None
 
@@ -83,44 +92,41 @@ def create_workflow():
     WORKFLOW_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(WORKFLOW_PATH, "w") as f:
         f.write(WORKFLOW_CONTENT)
-    print("📄  Created workflow at: \033[1m.github/workflows/gen-dockerfile.yml\033[0m")
+    print(f"📄 Created workflow at {WORKFLOW_PATH}")
 
 def commit_and_push():
-    subprocess.run(["git", "add", str(WORKFLOW_PATH)])
-    subprocess.run(["git", "commit", "-m", "Add Docker image build & release workflow"])
-    subprocess.run(["git", "push"])
-    print("🚀  Workflow committed and pushed to GitHub.")
+    subprocess.run(["git", "add", str(WORKFLOW_PATH)], check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "ci: add static-site containerization workflow"],
+        check=True
+    )
+    subprocess.run(["git", "push"], check=True)
+    print("🚀 Workflow committed and pushed to GitHub")
 
 def main():
-    print("\n🛠️  \033[1mDockerfile & Docker Image Generator via GitHub Actions\033[0m\n")
+    print("\n🛠️  Static Site Containerization via GitHub Actions\n")
 
     if not is_git_repo():
-        print("❌  \033[91mYou are not inside a Git repository or it is not initialized.\033[0m")
-        print("💡  Navigate to your GitHub project folder or initialize the repo and try again.\n")
+        print("❌ You must run this inside a Git repo.")
         sys.exit(1)
 
-    github_url = get_github_remote()
-    if not github_url:
-        print("❌  \033[91mNo GitHub remote named 'origin' found.\033[0m")
-        print("🔗  Make sure your repo is connected to GitHub.\n")
+    remote = get_github_remote()
+    if not remote:
+        print("❌ No 'origin' remote pointing to GitHub found.")
         sys.exit(1)
 
-    print(f"🔗  GitHub repository detected: \033[1m{github_url}\033[0m")
+    print(f"🔗 GitHub repo detected: {remote}")
 
     if WORKFLOW_PATH.exists():
-        print("✅  Workflow already exists — nothing to do!\n")
+        print("✅ Workflow already exists. Nothing to do.")
     else:
-        print("📂  No workflow found to generate Dockerfile & image.")
-        print("➕  Creating one for you now...\n")
+        print("➕ Generating workflow for static-site containerization…")
         create_workflow()
-
-        answer = input("🤖  Do you want to commit and push this workflow now? (y/n): ").strip().lower()
+        answer = input("Commit & push this workflow now? (y/n): ").strip().lower()
         if answer == "y":
             commit_and_push()
-            print("\n⏳  GitHub Actions will now handle the Dockerfile generation, image build, tagging, and release.")
-            print("📦  Once done, check the \033[1mReleases\033[0m tab on GitHub.\n")
         else:
-            print("🚫  Skipped commit. You can manually push it later if you want.\n")
+            print("⚠️  Skipped commit. Push it manually when ready.")
 
 if __name__ == "__main__":
     main()
